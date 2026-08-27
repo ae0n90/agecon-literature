@@ -1,0 +1,49 @@
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config.toml
+*.key
+*.pem
+
+# Browser sessions, credentials, and runtime state
+.cnki-mcp/
+browser_profiles/
+cookies*.json
+storage_state*.json
+runtime/
+state/
+*.sqlite
+*.sqlite3
+*.db
+
+# Retrieved documents and user exports
+downloads/
+exports/
+*.pdf
+*.caj
+*.nh
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# Personal development records
+progress_logs/

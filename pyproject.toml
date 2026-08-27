@@ -1,0 +1,92 @@
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[project]
+name = "agecon-literature-mcp"
+version = "0.1.0"
+description = "A local-first CNKI discovery and Zotero 10 Local API workflow MCP."
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+requires-python = ">=3.11,<3.15"
+authors = [{ name = "AgEcon Literature contributors" }]
+keywords = ["cnki", "zotero", "mcp", "literature-review"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+  "cnki-mcp @ git+https://github.com/SepineTam/cnki-mcp.git@db770560ec38195623b4cf17ca5d51c944ae9288",
+  "httpx>=0.28.1,<1",
+  "keyring>=25.6,<26",
+  "mcp[cli]>=1.28.1,<2",
+  "platformdirs>=4.3,<5",
+  "pydantic>=2.10,<3",
+  "pypdf>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2,<2",
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.25,<2",
+  "pyyaml>=6.0,<7",
+  "ruff>=0.11,<1",
+]
+
+[project.scripts]
+agecon-literature = "agecon_literature_mcp.cli:main"
+agecon-literature-mcp = "agecon_literature_mcp.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ae0n90/agecon-literature"
+Repository = "https://github.com/ae0n90/agecon-literature"
+Issues = "https://github.com/ae0n90/agecon-literature/issues"
+
+[tool.uv]
+required-version = ">=0.11.3"
+
+[tool.uv.build-backend]
+source-exclude = ["**/.DS_Store"]
+source-include = [
+  ".github/workflows/**",
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "PRIVACY.md",
+  "PROJECT_STATE.md",
+  "SECURITY.md",
+  "THIRD_PARTY_NOTICES.md",
+  "config.example.toml",
+  "contracts/**",
+  "docs/**",
+  "scripts/**",
+  "skills/**",
+  "tests/**",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests/unit", "tests/contract"]
+markers = [
+  "live: requires an explicitly configured CNKI or Zotero desktop session",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["agecon_literature_mcp"]
+mypy_path = "src"

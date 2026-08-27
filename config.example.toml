@@ -1,0 +1,40 @@
+# Copy to a path outside the repository, preferably:
+# ~/Library/Application Support/agecon-literature/config.toml
+# Or point AGECON_LIT_CONFIG to a custom path.
+
+[runtime]
+# Leave blank to use the platform-specific user data directory.
+data_dir = ""
+database_name = "operations.sqlite3"
+download_subdir = "downloads"
+export_subdir = "exports"
+
+[cnki]
+profile = "default"
+max_results = 100
+max_metadata_hydration = 20
+headless = false
+# Experimental RF-field candidate-citation search. It is never represented as
+# a complete citation graph.
+enable_candidate_citation_search = false
+
+[pdf]
+max_bytes = 104857600
+require_pdf_extension = false
+keep_verified_downloads = true
+
+[zotero]
+base_url = "http://127.0.0.1:23119/api"
+library_path = "/users/0"
+allow_root_library = true
+# Collection keys only, not collection names. Empty means no collection is
+# allowlisted; root imports are still controlled by allow_root_library.
+allowed_collections = []
+app_name = "AgEcon Literature MCP"
+request_timeout_seconds = 30.0
+
+[safety]
+plan_ttl_minutes = 30
+max_batch_import = 20
+allow_existing_item_updates = false
+allow_delete = false

@@ -1,0 +1,14 @@
+interface:
+  display_name: "AgEcon 文献研究"
+  short_description: "CNKI 发现检索、Zotero 导入与证据化文献脉络梳理"
+  brand_color: "#7A3E12"
+  default_prompt: "Use $agecon-literature-research to search this topic, verify selected papers, and build an evidence-aware literature map."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "agecon-literature"
+      description: "Local AgEcon Literature MCP for CNKI retrieval and Zotero 10 Local API workflows"
+
+policy:
+  allow_implicit_invocation: true
