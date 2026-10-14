@@ -35,7 +35,7 @@ def normalize_title(value: str) -> str:
 
 def normalize_doi(value: str | None) -> str | None:
     """Strip resolver prefixes and normalize a DOI for equality checks."""
-    normalized = normalize_space(value)
+    normalized = normalize_space(re.sub(r"[\ufeff\u200b-\u200d\u2060]", "", value or ""))
     if not normalized:
         return None
     normalized = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi\s*:\s*)", "", normalized, flags=re.I)

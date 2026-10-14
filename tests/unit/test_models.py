@@ -93,3 +93,9 @@ def test_cnki_identity_accepts_explicit_filename_fields() -> None:
         }
     )
     assert record.source_id == "CJFD:NYJJ202401001"
+
+
+def test_doi_drops_invisible_characters() -> None:
+    doi = "\ufeff10.20077/J.CNKI.11-1262/F.2007.05.005\u200b"
+    record = LiteratureRecord(id="x", title="t", doi=doi)
+    assert record.doi == "10.20077/j.cnki.11-1262/f.2007.05.005"

@@ -8,8 +8,19 @@ All notable changes to this project will be documented here.
 
 - Renamed the MCP, CLI, Python namespace, companion Skill, runtime directory,
   and repository path to the unified `agecon-literature` naming scheme.
+- Added bilingual Chinese/English trigger wording in the Skill description.
+
+- Shortened the companion Skill: each rule stated once, import target taken
+  from the MCP config.
+- README: placeholder clone path, recommended Inbox-only import setup,
+  optional Jasminum pairing, gateway approval note, and upgrade path.
 
 ### Added
+
+- Skill no-result protocol: zero CNKI hits are reported as
+  `[待核验：知网未检得]` with recorded attempts, not as nonexistence.
+- Single allowlisted collection becomes the default import target when root
+  imports are disabled; `doctor` reports `import_targets`.
 
 - Initial local-first MCP architecture and companion literature-research Skill.
 - CNKI session storage, Zotero Local API client, PDF validation, and operation
@@ -18,6 +29,10 @@ All notable changes to this project will be documented here.
   and explicit non-circumvention boundaries for off-campus use.
 
 ### Fixed
+
+- Attachment verification compares md5 only, since Zotero plugins rename files.
+- Search results no longer downgrade previously hydrated records.
+- DOIs are stripped of BOM and zero-width characters.
 
 - Use non-editable runtime invocations so macOS `UF_HIDDEN` flags cannot make
   the project package disappear from Python's import path.

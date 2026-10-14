@@ -3,7 +3,13 @@ from pathlib import Path
 import pytest
 
 from agecon_literature_mcp.exceptions import InvalidPlan
-from agecon_literature_mcp.models import LiteratureRecord, PlanKind, PlanState, SearchSpec
+from agecon_literature_mcp.models import (
+    EvidenceLevel,
+    LiteratureRecord,
+    PlanKind,
+    PlanState,
+    SearchSpec,
+)
 from agecon_literature_mcp.storage import Ledger
 
 
@@ -17,6 +23,28 @@ def test_session_record_roundtrip(tmp_path: Path) -> None:
     loaded = ledger.get_records(session_id=session_id)
     assert loaded == [record]
     assert ledger.get_session(session_id)["spec"]["query"] == "农业社会化服务"
+
+
+def test_search_result_does_not_downgrade_hydrated_record(tmp_path: Path) -> None:
+    ledger = Ledger(tmp_path / "ledger.sqlite3")
+    hydrated = LiteratureRecord(
+        id="cnki-1",
+        title="示例",
+        abstract="摘要",
+        doi="10.1/x",
+        institutions=["某研究中心"],
+        url="https://old.example",
+        evidence_level=EvidenceLevel.ABSTRACT,
+    )
+    ledger.upsert_record(hydrated)
+    searched = LiteratureRecord(id="cnki-1", title="示例", url="https://new.example")
+    stored = ledger.upsert_record(searched)
+    assert stored == ledger.get_record("cnki-1")
+    assert stored.evidence_level is EvidenceLevel.ABSTRACT
+    assert stored.abstract == "摘要"
+    assert stored.doi == "10.1/x"
+    assert stored.institutions == ["某研究中心"]
+    assert stored.url == "https://new.example"
 
 
 def test_plan_token_is_exact_and_single_use(tmp_path: Path) -> None:

@@ -517,9 +517,9 @@ class ZoteroLocalClient:
         data = item.get("data", item)
         if not isinstance(data, dict):
             return False
+        # Compare content only: Zotero and its plugins may rename stored files.
         actual_md5 = str(data.get("md5") or "").casefold()
-        actual_filename = str(data.get("filename") or "")
-        return actual_md5 == artifact.md5.casefold() and actual_filename == artifact.path.name
+        return actual_md5 == artifact.md5.casefold()
 
 
 __all__ = ["KEYRING_SERVICE", "KeyStore", "SystemKeyStore", "ZoteroLocalClient"]

@@ -131,6 +131,19 @@ def test_full_pdf_upload_has_three_persistable_protocol_phases(sample_pdf: Path)
     assert phases == ["authorize", "bytes", "register"]
 
 
+def test_attachment_verification_ignores_renamed_file(sample_pdf: Path) -> None:
+    artifact = validate_pdf(sample_pdf, max_bytes=1_000_000)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/users/0/items/ATCH2345"
+        data = {"key": "ATCH2345", "md5": artifact.md5, "filename": "2007-作者 等-题名.pdf"}
+        return httpx.Response(200, json={"key": "ATCH2345", "data": data})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    zotero = ZoteroLocalClient(ZoteroSettings(), key_store=MemoryKeyStore(), client=http)
+    assert zotero.verify_attachment("ATCH2345", artifact)
+
+
 def test_match_keeps_fuzzy_candidate_separate() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         headers = {"Zotero-Server-ID": "SERVER1", "Zotero-API-Version": "3"}

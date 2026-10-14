@@ -26,6 +26,8 @@ keep_verified_downloads = true
 [zotero]
 base_url = "http://127.0.0.1:23119/api"
 library_path = "/users/0"
+# Recommended: set allow_root_library = false and allowlist one Inbox
+# collection; imports then default to that collection and are filed by hand.
 allow_root_library = true
 # Collection keys only, not collection names. Empty means no collection is
 # allowlisted; root imports are still controlled by allow_root_library.

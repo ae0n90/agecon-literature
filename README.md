@@ -116,7 +116,31 @@ uv run --no-editable agecon-literature zotero-authorize
 
 Zotero 弹窗中选择 **Always Allow**。PDF 导入需要多次写请求；一次性授权无法完成整条流程。持久 key 进入操作系统 Keychain，不写入配置文件。
 
-### 4. 自检
+### 4. 推荐：导入只进 Zotero Inbox
+
+建议在 Zotero 中新建一个分类（如 `Inbox`），让 agent 导入的新条目都进入这里，再由你手工归入主题分类。这样 agent 不需要知道你的分类结构，也只需要一个白名单分类。
+
+查出该分类的 key（8 位字母数字，不是分类名）：
+
+```bash
+curl --noproxy '*' -s 'http://127.0.0.1:23119/api/users/0/collections?limit=100' \
+  | python3 -c 'import json,sys; [print(c["key"], c["data"]["name"]) for c in json.load(sys.stdin)]'
+```
+
+写入应用配置 `config.toml` 的 `[zotero]` 段：
+
+```toml
+allow_root_library = false
+allowed_collections = ["ABCD1234"]  # Inbox
+```
+
+只有一个白名单分类且禁止导入根目录时，导入计划默认使用该分类；`doctor` 的 `import_targets` 会显示当前目标。修改配置后需重启 MCP 客户端。
+
+### 5. 可选：用 Zotero 插件补全引文字段
+
+CNKI 检索结果有时缺卷、期、页码。本工具和配套 Skill 不修改 Zotero 中已有题录；导入后 Skill 会列出缺失或可疑字段，建议在 Inbox 中用 [Jasminum（茉莉花）](https://github.com/l0o0/jasminum) 等插件从知网补全，再手工分类。插件可能改写 `extra` 字段和附件文件名，因此本工具的溯源信息（记录 ID、证据等级、PDF 哈希）保存在本地账本中，附件复核只比对文件内容（MD5）。
+
+### 6. 自检
 
 ```bash
 uv run --no-editable agecon-literature doctor
@@ -146,6 +170,7 @@ tool_timeout_sec = 180
 default_tools_approval_mode = "writes"
 ```
 
+`default_tools_approval_mode` 只在客户端直接管理该 MCP 时生效。经网关或代理转接、或客户端审批策略设为不询问时，计划返回的确认 token 会直接交给模型，"展示计划 → 用户明确同意 → 提交"这一关由配套 Skill 约束。可接受的原因是写入范围本身有限：只写白名单目标，不删除、不覆盖已有条目，token 一次性且短期有效。
 也可仅在 loopback 上运行 HTTP：
 
 ```bash
@@ -162,7 +187,9 @@ uv run --no-editable agecon-literature serve --transport http --host 127.0.0.1 -
 uv run --no-editable python scripts/install_skill.py
 ```
 
-若目标已存在，脚本默认拒绝覆盖；明确升级时使用 `--force`。也可把 Skill 目录打成 zip，按支持 Skill bundle 的客户端方式安装。
+若目标已存在，脚本默认拒绝覆盖；明确升级时使用 `--force`。
+
+升级时先 `git pull`，再运行 `uv run --no-editable python scripts/install_skill.py --force` 并重启客户端。`--force` 会覆盖已安装副本；需要调整 Skill 时请改仓库中的 `skills/` 再安装，不要只改安装目录，否则下次升级会丢失改动，仓库与本地也会不一致。也可把 Skill 目录打成 zip，按支持 Skill bundle 的客户端方式安装。
 
 ## 安全工作流示例
 

@@ -68,6 +68,11 @@ class LiteratureService:
             },
             "cnki": self.cnki.status(),
             "zotero": zotero,
+            "import_targets": {
+                "allow_root_library": self.settings.zotero.allow_root_library,
+                "allowed_collections": list(self.settings.zotero.allowed_collections),
+                "default_collection": self._default_collection(),
+            },
             "safety": {
                 "plan_ttl_minutes": self.settings.safety.plan_ttl_minutes,
                 "max_batch_import": self.settings.safety.max_batch_import,
@@ -75,6 +80,13 @@ class LiteratureService:
                 "delete": False,
             },
         }
+
+    def _default_collection(self) -> str | None:
+        """Use the only allowlisted collection when root imports are disabled (Inbox setup)."""
+        zotero = self.settings.zotero
+        if not zotero.allow_root_library and len(zotero.allowed_collections) == 1:
+            return zotero.allowed_collections[0]
+        return None
 
     def lit_search(
         self,
@@ -105,8 +117,7 @@ class LiteratureService:
         )
         records = self._deduplicate_search_records(self.cnki.search(spec))
         session_id = self.ledger.create_session(spec)
-        for record in records:
-            self.ledger.upsert_record(record)
+        records = [self.ledger.upsert_record(record) for record in records]
         self.ledger.add_session_records(session_id, records)
         return {
             "session_id": session_id,
@@ -411,6 +422,7 @@ class LiteratureService:
         if len(record_ids) > self.settings.safety.max_batch_import:
             raise ValueError("record_ids exceeds the configured batch limit")
         server = self.zotero.probe()
+        collection_key = collection_key or self._default_collection()
         self.zotero.validate_collection(collection_key)
         paths = pdf_paths or {}
         planned_items: list[dict[str, Any]] = []

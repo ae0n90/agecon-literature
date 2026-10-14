@@ -26,6 +26,24 @@ Start with the narrowest verified field. Widen only after recording why the
 narrow query failed. Compare versions and do not silently substitute a working
 paper for a published article.
 
+### No-result protocol
+
+Use when a known title or cited reference returns zero hits. Record each
+attempt (field, query, filters, count) and stop at the first hit whose identity
+verifies.
+
+1. Remove year, journal and source-type filters; the default search covers the
+   whole CNKI database.
+2. Search a normalized title (no subtitle, quotation marks or 书名号; try
+   full-width and half-width punctuation), then two or three distinctive title
+   terms with `title` and `topic`, then the cited author and year.
+3. Repeat one query already known to hit. If it also returns zero, report CNKI
+   unavailable or the session expired, not absence.
+4. A similar title by the same authors is a candidate, not a match; report the
+   differences. Otherwise label the item `[待核验：知网未检得]`, list the
+   attempts, and in review feedback ask for journal, year, issue, pages or DOI
+   rather than asserting the reference does not exist.
+
 ## Lineage
 
 Purpose: trace how a question, mechanism, method, or dataset developed.
@@ -40,4 +58,5 @@ Purpose: reconcile selected records with Zotero and preserve only useful items.
 
 Always match first. Prefer metadata-only for plausible but not-yet-core sources.
 Acquire and attach PDFs only when full text is needed for a named analytic task.
-Verify every write by reading it back.
+Import into the allowlisted collection (recommended: one Inbox) and verify
+every write by reading it back.

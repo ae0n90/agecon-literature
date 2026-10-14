@@ -31,7 +31,7 @@ class FakeZotero:
         return {"server_id": "SERVER1", "available": True}
 
     def validate_collection(self, collection_key: str | None) -> None:
-        assert collection_key is None
+        self.validated_collection = collection_key
 
     def match(self, record: LiteratureRecord) -> list[Any]:
         return []
@@ -106,11 +106,7 @@ class FakeZotero:
             self.fail_register_once and self.register_attempts == 1
         ):
             attachment["md5"] = artifact.md5
-            attachment["filename"] = artifact.path.name
-        return (
-            attachment.get("md5") == artifact.md5
-            and attachment.get("filename") == artifact.path.name
-        )
+        return bool(attachment.get("md5") == artifact.md5)
 
 
 def _service(tmp_path: Path, fake_zotero: FakeZotero) -> LiteratureService:
@@ -132,6 +128,16 @@ def _service(tmp_path: Path, fake_zotero: FakeZotero) -> LiteratureService:
         )
     )
     return service
+
+
+def test_single_allowlisted_collection_is_default_target(tmp_path: Path) -> None:
+    fake = FakeZotero()
+    service = _service(tmp_path, fake)
+    service.settings.zotero.allow_root_library = False
+    service.settings.zotero.allowed_collections = ["INBOX123"]
+    plan = service.zotero_plan_import(["cnki-1"], mode="metadata_only")
+    assert fake.validated_collection == "INBOX123"
+    assert plan["items"][0]["collection_key"] == "INBOX123"
 
 
 def test_metadata_only_plan_and_commit_complete(tmp_path: Path) -> None:

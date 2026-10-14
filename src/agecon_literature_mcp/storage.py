@@ -14,7 +14,38 @@ from pathlib import Path
 from typing import Any
 
 from .exceptions import InvalidPlan
-from .models import LiteratureRecord, OperationState, PlanKind, PlanState, SearchSpec
+from .models import (
+    EvidenceLevel,
+    LiteratureRecord,
+    OperationState,
+    PlanKind,
+    PlanState,
+    SearchSpec,
+)
+
+_EVIDENCE_RANK = {
+    EvidenceLevel.SEARCH_RESULT: 0,
+    EvidenceLevel.METADATA: 1,
+    EvidenceLevel.ABSTRACT: 2,
+    EvidenceLevel.FULL_TEXT: 3,
+}
+# Session links and counts are fresher in a new search result than in storage.
+_VOLATILE_FIELDS = {"url", "download_url", "citation_count"}
+
+
+def _merge_preserving_evidence(
+    existing: LiteratureRecord, incoming: LiteratureRecord
+) -> LiteratureRecord:
+    """Keep hydrated fields when a lower-evidence result for the same record arrives."""
+    if _EVIDENCE_RANK[incoming.evidence_level] >= _EVIDENCE_RANK[existing.evidence_level]:
+        return incoming
+    merged = existing.model_dump()
+    for key, value in incoming.model_dump().items():
+        if value in (None, "", []):
+            continue
+        if key in _VOLATILE_FIELDS or merged.get(key) in (None, "", []):
+            merged[key] = value
+    return LiteratureRecord.model_validate(merged)
 
 SCHEMA_VERSION = 1
 
@@ -140,8 +171,15 @@ class Ledger:
             "created_at": row["created_at"],
         }
 
-    def upsert_record(self, record: LiteratureRecord) -> None:
+    def upsert_record(self, record: LiteratureRecord) -> LiteratureRecord:
+        """Store a record without downgrading previously hydrated evidence."""
         with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT data_json FROM records WHERE id = ?", (record.id,)
+            ).fetchone()
+            if row is not None:
+                existing = LiteratureRecord.model_validate_json(row["data_json"])
+                record = _merge_preserving_evidence(existing, record)
             connection.execute(
                 """
                 INSERT INTO records(
@@ -171,6 +209,7 @@ class Ledger:
                     datetime.now(UTC).isoformat(),
                 ),
             )
+        return record
 
     def add_session_records(self, session_id: str, records: list[LiteratureRecord]) -> None:
         with self.transaction() as connection:
