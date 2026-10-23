@@ -20,3 +20,6 @@ Rules:
 - A citation count is a platform/time-specific signal, not paper quality.
 - A frequent author in one session is not automatically an important field
   scholar. Explain the selection basis.
+
+For full-text provenance, page coverage and cross-paper evidence notes, follow
+`full-text-reading.md`. Store these in existing notes; extraction is not validation.

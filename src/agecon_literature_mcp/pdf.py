@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from email.message import Message
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import httpx
 from pypdf import PdfReader
@@ -20,6 +22,33 @@ def safe_filename(title: str, suffix: str = ".pdf", max_stem: int = 120) -> str:
     cleaned = re.sub(r"[\\/:*?\"<>|\x00-\x1f]+", "_", title)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._") or "document"
     return f"{cleaned[:max_stem].rstrip()}{suffix}"
+
+
+def original_pdf_name(name: str | None) -> str:
+    """Validate a server filename without rewriting it or inventing an extension."""
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or any(ord(c) < 32 for c in name)
+        or not name.lower().endswith(".pdf")
+    ):
+        raise PdfValidationError("server did not provide a safe original PDF filename")
+    return name
+
+
+def response_pdf_name(content_disposition: str) -> str:
+    message = Message()
+    message["Content-Disposition"] = content_disposition
+    return original_pdf_name(message.get_filename())
+
+
+def download_directory(base: Path) -> Path:
+    """Separate attempts by directory, never by changing the source filename."""
+    directory = base / uuid4().hex
+    directory.mkdir(parents=True, exist_ok=False, mode=0o700)
+    return directory
 
 
 def _hash_file(path: Path, algorithm: str) -> str:
@@ -79,13 +108,16 @@ async def download_direct_pdf(
     """Download a direct CNKI PDF URL and reject HTML, CAJ, or oversized bytes."""
     if not is_cnki_url(url):
         raise PdfValidationError("download URL must be an HTTPS cnki.net URL")
-    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    partial = destination.with_suffix(destination.suffix + ".part")
+    directory = download_directory(destination)
+    partial = directory / ".download.part"
     owns_client = client is None
     http = client or httpx.AsyncClient(follow_redirects=True, timeout=60)
     try:
         async with http.stream("GET", url) as response:
             response.raise_for_status()
+            destination = directory / response_pdf_name(
+                response.headers.get("content-disposition", "")
+            )
             content_type = response.headers.get("content-type", "").casefold()
             if "text/html" in content_type or "application/json" in content_type:
                 raise PdfValidationError(f"server returned {content_type or 'non-PDF content'}")

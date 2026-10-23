@@ -191,15 +191,16 @@ def create_server(
     async def zotero_plan_import(
         record_ids: list[str],
         mode: Literal[
+            "standalone_pdf",
             "metadata_only",
             "metadata_with_pdf",
             "attach_pdf_to_existing",
-        ] = "metadata_only",
+        ] = "standalone_pdf",
         collection_key: str | None = None,
         pdf_paths: dict[str, str] | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Deduplicate and plan; modes: metadata_only/metadata_with_pdf/attach_pdf_to_existing."""
+        """Plan original-name standalone PDFs for Jasminum, without parent metadata."""
         return await _run_blocking(
             literature.zotero_plan_import,
             record_ids,

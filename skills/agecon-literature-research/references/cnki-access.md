@@ -1,32 +1,25 @@
-# CNKI access decision rules
+# CNKI access: download-time only
 
-Use this reference when the user is off campus, a CNKI session fails, or PDF
-entitlement is uncertain.
+Search, metadata, abstracts and field mapping do not require an IP or login check.
+Starting a persistent browser for those tasks must not call `ensure_login`.
 
-## Decision order
+When the user requests a PDF:
 
-1. On campus: use the configured campus-IP profile.
-2. Off campus: prefer the user's own institutional CARSI session in a dedicated
-   profile (for example `institution-carsi`).
-3. If CARSI does not cover the route: the user may connect the computer through
-   the institution's official VPN outside the MCP, then refresh the profile.
-4. If neither route grants access: continue with metadata/abstract work, use an
-   authorized document-delivery option, or ask the user to supply the PDF.
+1. Inspect CNKI's own current institutional/network recognition in the download
+   browser. Prefer direct campus-IP access; do not equate the presence of a
+   personal-login button with lack of institutional entitlement.
+2. If recognition is unknown, try the selected paper's explicit PDF control.
+   A returned, validated PDF proves access to that paper. IP geolocation, a
+   successful search, or a visible PDF link alone does not prove entitlement.
+3. If the route redirects to institutional authentication or explicitly denies
+   download access, use CNKI organization/institution login and the user's school
+   SSO account. Authentication is interactive; never collect credentials in chat
+   or config. Reuse the same profile after authentication. Never force SSO for a
+   working campus-IP route.
+4. Timeouts, CAPTCHA, missing controls, and subscription exclusions are distinct
+   failures. Do not classify all failures as off-campus access. Never bypass a
+   challenge or repeatedly retry downloads.
 
-CARSI and VPN extend only the institution's existing subscription. They do not
-make every CNKI item downloadable.
-
-## Safe operating rules
-
-- Authentication is interactive. Never ask for, accept, store, or auto-fill the
-  university password.
-- Never copy cookies or browser profiles between people or machines.
-- Never run a proxy/VPN relay or cloud download service for CNKI.
-- A successful search does not prove PDF entitlement.
-- Test PDF access only on a paper selected on substantive grounds, through the
-  normal plan and approval workflow.
-- HTML/login/CAJ responses and validation failures are failures, not PDFs.
-- Security verification and reauthentication require the user.
-
-Project setup details are in `docs/cnki-access.md` in the
-AgEcon Literature MCP repository.
+Only PDF is accepted. Keep the server's original PDF filename and verify bytes;
+HTML, CAJ and missing/unsafe original filenames fail closed. No entitlement
+check or SSO flow should run until a PDF is requested.

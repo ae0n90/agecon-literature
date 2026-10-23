@@ -11,9 +11,11 @@ The companion Skill supports evidence-aware literature discovery and synthesis.
 - Persistent search sessions and canonical metadata records.
 - On-demand detail and abstract hydration through a pinned CNKI adapter.
 - Author, year, journal, and keyword summaries of retrieved records.
-- PDF planning, validation, and a hash ledger.
+- PDF planning, original server filenames, download-time access checks, and a hash ledger.
 - Read-only Zotero duplicate matching and planned imports through the Local API.
-- Resumable attachment operations and read-back verification.
+- Standalone PDF imports for Jasminum, resumable attachment operations, and
+  separate byte, identity, required-field and attachment-count verification.
+- Content-addressed local PDF extraction with numbered pages and integrity checks.
 - Configurable import allowlists and a default target for a single collection.
 
 ## Known limits
@@ -21,7 +23,8 @@ The companion Skill supports evidence-aware literature discovery and synthesis.
 - Reference and similarity graphs are not complete.
 - Zero-hit searches do not distinguish all session and access failures.
 - Volume, issue, pages, and document type may be missing from source metadata.
-- Author searches may mix namesakes; combine author and title or journal terms.
+- Source author fields may mix namesakes or affiliations; check source pages
+  before interpreting author-frequency summaries.
 - CNKI access depends on the user's current institutional entitlement.
 - Approval behavior depends on the MCP client; see the README for gateway
   and client-policy considerations.

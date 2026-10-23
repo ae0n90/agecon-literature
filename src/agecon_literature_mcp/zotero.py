@@ -62,6 +62,8 @@ class SystemKeyStore:
 def _creator_names(creators: Iterable[dict[str, Any]]) -> list[str]:
     names: list[str] = []
     for creator in creators:
+        if creator.get("creatorType", "author") != "author":
+            continue
         name = creator.get("name")
         if not name:
             name = " ".join(
@@ -81,6 +83,39 @@ def _year_from_date(value: object) -> int | None:
             if 1000 <= year <= 2200:
                 return year
     return None
+
+
+def assess_metadata(record: LiteratureRecord, data: dict[str, Any]) -> dict[str, Any]:
+    """Read-only identity comparison and field-presence check, not metadata repair."""
+    authors = _creator_names(data.get("creators") or [])
+    pairs = {
+        "title": (record.title_key, normalize_title(str(data.get("title") or ""))),
+        "first_author": (record.first_author_key, normalize_title(authors[0]) if authors else ""),
+        "year": (record.year, _year_from_date(data.get("date"))),
+        "DOI": (normalize_doi(record.doi), normalize_doi(data.get("DOI") or None)),
+    }
+    compared = [key for key, (expected, actual) in pairs.items() if expected and actual]
+    conflicts = [key for key in compared if pairs[key][0] != pairs[key][1]]
+    strong = "DOI" in compared or all(k in compared for k in ("title", "first_author", "year"))
+    required = ["itemType", "title", "date"]
+    if data.get("itemType") == "journalArticle":
+        required += ["publicationTitle", "issue", "pages"]
+    elif data.get("itemType") == "thesis":
+        required += ["university"]
+    if record.doi:
+        required.append("DOI")
+    missing = [key for key in required if not str(data.get(key) or "").strip()]
+    if not authors:
+        missing.append("author")
+    if data.get("date") and pairs["year"][1] is None:
+        missing.append("parseable_year")
+    return {
+        "identity_status": "conflict" if conflicts else "matched" if strong else "incomplete",
+        "identity_conflicts": conflicts,
+        "compared_fields": compared,
+        "missing_fields": missing,
+        "required_fields_complete": not missing,
+    }
 
 
 class ZoteroLocalClient:
@@ -257,7 +292,14 @@ class ZoteroLocalClient:
 
     def find_by_operation_marker(self, operation_id: str) -> list[dict[str, Any]]:
         """Find items created by one operation without relying on write-token memory."""
-        return self.search_items(operation_id, limit=20, qmode="everything")
+        # Include attachments even after Jasminum has assigned a parent.
+        payload = self._read_json(
+            f"{self.settings.library_path}/items",
+            params={"q": operation_id, "qmode": "everything", "limit": 100, "format": "json"},
+        )
+        if not isinstance(payload, list):
+            raise ZoteroError("Zotero returned a non-list recovery payload")
+        return [item for item in payload if isinstance(item, dict)]
 
     def match(self, record: LiteratureRecord, *, limit: int = 50) -> list[ZoteroMatch]:
         """Return exact and fuzzy candidates; never merge or modify them."""
@@ -299,7 +341,10 @@ class ZoteroLocalClient:
                 )
                 and (record.year is None or year is None or record.year == year)
             ):
-                kind, score = MatchKind.TITLE_AUTHOR_YEAR_EXACT, 0.98
+                if record.first_author_key and creators and record.year and year:
+                    kind, score = MatchKind.TITLE_AUTHOR_YEAR_EXACT, 0.98
+                else:
+                    kind, score = MatchKind.TITLE_METADATA_INCOMPLETE, 0.9
             elif title_score >= 0.85:
                 kind, score = MatchKind.TITLE_CANDIDATE, title_score
             if kind != MatchKind.NONE:
@@ -345,9 +390,7 @@ class ZoteroLocalClient:
         return {
             "itemType": "journalArticle",
             "title": record.title,
-            "creators": [
-                {"creatorType": "author", "name": author} for author in record.authors
-            ],
+            "creators": [{"creatorType": "author", "name": author} for author in record.authors],
             "abstractNote": record.abstract or "",
             "publicationTitle": record.source_title or "",
             "volume": record.volume or "",
@@ -365,14 +408,14 @@ class ZoteroLocalClient:
     @staticmethod
     def attachment_payload(
         *,
-        parent_key: str,
+        parent_key: str | None,
         artifact: PdfArtifact,
         title: str,
     ) -> dict[str, Any]:
         return {
             "itemType": "attachment",
             "linkMode": "imported_file",
-            "parentItem": parent_key,
+            **({"parentItem": parent_key} if parent_key else {}),
             "title": title,
             "contentType": "application/pdf",
             "charset": "",

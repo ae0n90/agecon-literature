@@ -61,14 +61,14 @@ TOOL_CATALOG: list[dict[str, Any]] = [
         "category": "local_write",
         "read_only_external": False,
         "destructive": False,
-        "description": "Consume a confirmed plan, download, and verify one PDF.",
+        "description": "Check download access; preserve and verify the original PDF.",
     },
     {
         "name": "zotero_plan_import",
         "category": "local_plan",
         "read_only_external": True,
         "destructive": False,
-        "description": "Deduplicate and create a short-lived Zotero import plan.",
+        "description": "Plan original-name standalone PDF import; Jasminum owns parent metadata.",
     },
     {
         "name": "zotero_commit_import",

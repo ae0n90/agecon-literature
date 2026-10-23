@@ -4,6 +4,16 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+- Default PDF import to original-name standalone attachments for Jasminum;
+  separate byte verification, identity matching, field presence and PDF count.
+- Check CNKI institutional access only for PDF downloads; distinguish explicit
+  login requirements from subscription denials.
+- Treat missing author/year title matches as candidates and stop recovery when
+  operation markers or newly appeared candidates are ambiguous.
+- Add content-addressed local PDF extraction with page evidence guidance.
+- Remove personal package-author contact information and document reinstalling
+  the package before reconnecting an upgraded MCP server.
+
 ### Changed
 
 - Renamed the MCP, CLI, Python namespace, companion Skill, runtime directory,

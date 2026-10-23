@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 from .config import CnkiSettings
 from .exceptions import PdfValidationError, SetupRequired, SourceUnavailable
 from .models import EvidenceLevel, LiteratureRecord, SearchSpec, stable_id
-from .pdf import validate_pdf
+from .pdf import download_directory, original_pdf_name, response_pdf_name, validate_pdf
 
 _YEAR_PATTERN = re.compile(r"(?:19|20)\d{2}")
 _GENERIC_SOURCE_IDS = frozenset(
@@ -138,6 +138,7 @@ class CnkiProvider:
         self.settings = settings
         self._service: Any | None = None
         self._lock = RLock()
+        self.last_download_access: dict[str, Any] = {}
 
     @staticmethod
     def _imports() -> tuple[Any, Any]:
@@ -180,19 +181,11 @@ class CnkiProvider:
         with self._lock:
             if self._service is not None and self._service.worker.is_running:
                 return self._service
-            auth, service_type = self._imports()
-            try:
-                auth.require_profile(self.settings.profile)
-            except Exception as exc:
-                raise SetupRequired(
-                    "CNKI browser profile is missing; run "
-                    f"'agecon-literature cnki-init --profile {self.settings.profile}'"
-                ) from exc
+            _, service_type = self._imports()
             service = self._service or service_type()
-            try:
-                service.login(self.settings.profile)
-            except Exception as exc:
-                raise SetupRequired(f"CNKI login/session check failed: {exc}") from exc
+            # Opening the persistent browser does not require institutional login.
+            # Search/abstract reads must never run ensure_login or an SSO preflight.
+            service.worker.start(profile=self.settings.profile)
             self._service = service
             return service
 
@@ -296,6 +289,37 @@ class CnkiProvider:
             raise SourceUnavailable(f"CNKI candidate-citation search failed: {exc}") from exc
         return [canonicalize_cnki(row) for row in rows]
 
+    @staticmethod
+    def _download_access_state(url: str, text: str) -> dict[str, Any]:
+        """Use CNKI's own network recognition, not IP geolocation or search success.
+
+        Absence of a campus signal is unknown, not proof that SSO is required.
+        No passwords, cookies or raw page text are retained.
+        """
+        host = (urlparse(url).hostname or "").lower()
+        if any(word in host for word in ("sso", "passport", "fsso", "carsi")):
+            return {"status": "institutional_login_required", "basis": "login_redirect"}
+        if re.search(r"(?:未登录|未识别|未检测到).{0,8}(?:机构|IP)|IP不在", text):
+            return {"status": "unknown", "basis": "no_institution_recognized"}
+        if re.search(r"(?:IP用户|IP登录成功|机构用户[:\uff1a]|机构名称[:\uff1a])", text):
+            return {"status": "institution_recognized", "basis": "cnki_network_display"}
+        return {"status": "unknown", "basis": "try_direct_pdf_first"}
+
+    def _check_download_access(self, page: Any) -> dict[str, Any]:
+        # This preflight is deliberately called only by download_pdf.
+        page.goto("https://www.cnki.net/", wait_until="domcontentloaded", timeout=30_000)
+        state = self._download_access_state(page.url, page.locator("body").inner_text())
+        self.last_download_access = state
+        return state
+
+    def _sso_required(self) -> SetupRequired:
+        return SetupRequired(
+            "CNKI requires institutional access for this PDF. On campus, check campus-IP "
+            "recognition; off campus, use CNKI institutional/organization login and your "
+            "university SSO account in the browser, then retry. No SSO is required for "
+            "metadata searches. Do not provide passwords to the MCP."
+        )
+
     def download_pdf(
         self,
         detail_url: str,
@@ -303,10 +327,11 @@ class CnkiProvider:
         *,
         max_bytes: int,
     ) -> Any:
-        """Use the authenticated browser to click an explicit PDF control."""
+        """Check current network access only now; preserve the original PDF filename."""
         service = self._ensure_service()
-        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        partial = destination.with_suffix(destination.suffix + ".part")
+        directory = download_directory(destination)
+        partial = directory / ".download.part"
+        original_name: str | None = None
         selectors = (
             "a:has-text('PDF下载')",
             "button:has-text('PDF下载')",
@@ -316,7 +341,16 @@ class CnkiProvider:
         )
 
         def retrieve(page: Any) -> None:
+            nonlocal original_name
+            access = self._check_download_access(page)
+            if access["status"] == "institutional_login_required":
+                raise self._sso_required()
             page.goto(detail_url, wait_until="domcontentloaded", timeout=30_000)
+            if (
+                self._download_access_state(page.url, "")["status"]
+                == "institutional_login_required"
+            ):
+                raise self._sso_required()
             failures: list[str] = []
             for selector in selectors:
                 locator = page.locator(selector)
@@ -341,6 +375,7 @@ class CnkiProvider:
                     try:
                         with page.expect_download(timeout=30_000) as download_info:
                             candidate.click(timeout=10_000)
+                        original_name = original_pdf_name(download_info.value.suggested_filename)
                         download_info.value.save_as(str(partial))
                         return
                     except Exception as exc:
@@ -353,10 +388,26 @@ class CnkiProvider:
                                 if response.ok:
                                     body = response.body()
                                     if len(body) <= max_bytes:
+                                        original_name = response_pdf_name(
+                                            response.headers.get("content-disposition", "")
+                                        )
                                         partial.write_bytes(body)
                                         return
                             except Exception as request_exc:
                                 failures.append(str(request_exc))
+            if (
+                self._download_access_state(page.url, "")["status"]
+                == "institutional_login_required"
+            ):
+                raise self._sso_required()
+            body_text = page.locator("body").inner_text()
+            if any(marker in body_text for marker in ("请先登录", "机构登录后下载")):
+                raise self._sso_required()
+            if any(marker in body_text for marker in ("无下载权限", "未订购", "未购买")):
+                raise SourceUnavailable(
+                    "CNKI denied access to this PDF; check institutional subscription. "
+                    "This alone does not establish that SSO login is needed."
+                )
             detail = "; ".join(failures[-3:])
             raise PdfValidationError(
                 "no working explicit PDF download control was found"
@@ -366,9 +417,10 @@ class CnkiProvider:
         try:
             service.worker.call(retrieve)
             validate_pdf(partial, max_bytes=max_bytes)
+            destination = directory / original_pdf_name(original_name)
             os.replace(partial, destination)
             return validate_pdf(destination, max_bytes=max_bytes)
-        except PdfValidationError:
+        except (PdfValidationError, SetupRequired, SourceUnavailable):
             raise
         except Exception as exc:
             raise PdfValidationError(f"CNKI browser PDF download failed: {exc}") from exc

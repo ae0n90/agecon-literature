@@ -13,16 +13,19 @@ automate bulk full-text acquisition.
 
 ## Recommended profiles
 
-### Campus IP
+### Campus IP: direct access first
 
-Use `default` while connected to the authorized campus network:
+Metadata searches and abstracts start the persistent browser without requiring
+login. No `cnki-init`, IP check or SSO is needed merely to search.
 
-```bash
-uv run --no-editable agecon-literature cnki-init --profile default
-```
+Only `pdf_download` checks CNKI's displayed institutional/network recognition.
+It attempts direct PDF access when the signal is recognized or unknown. The
+check does not use IP geolocation, publish the public IP, or assume all campus
+resources are subscribed. A login redirect or explicit download authorization
+failure requests institutional login; a timeout remains a network failure.
 
-IP recognition may stop working when the computer leaves campus. A browser
-profile created only under campus IP is not evidence of off-campus entitlement.
+The downloaded file retains the browser/server original filename. Separate
+attempt directories prevent collisions without renaming the file.
 
 ### Institutional CARSI (preferred off campus)
 
@@ -45,7 +48,7 @@ Consult your library's instructions for subscribed resources and access routes.
    profile = "institution-carsi"
    ```
 
-5. Restart the MCP client. Run a small metadata search first. Verify actual PDF
+5. Restart the MCP client if the profile was changed. Verify actual PDF
    entitlement only through the normal `pdf_plan` -> explicit approval ->
    `pdf_download` workflow for one selected paper.
 

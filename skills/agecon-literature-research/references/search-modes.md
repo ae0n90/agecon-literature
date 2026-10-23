@@ -56,7 +56,9 @@ is source-verified, candidate-only, or inferred from topical proximity.
 
 Purpose: reconcile selected records with Zotero and preserve only useful items.
 
-Always match first. Prefer metadata-only for plausible but not-yet-core sources.
-Acquire and attach PDFs only when full text is needed for a named analytic task.
+Always match first. Keep undecided candidates in search results; use metadata-only
+imports only when explicitly requested. For approved PDF imports, preserve the
+original filename and import a standalone attachment for Jasminum recognition.
+Acquire PDFs only when the user requests full text.
 Import into the allowlisted collection (recommended: one Inbox) and verify
 every write by reading it back.

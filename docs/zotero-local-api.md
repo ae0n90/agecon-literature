@@ -24,17 +24,43 @@ Authoritative protocol references:
 
 ## Full attachment upload
 
-For a stored-file child attachment:
+Default PDF imports create a standalone stored-file attachment, without a
+`parentItem` or bibliographic metadata. Jasminum handles automatic recognition;
+no plugin private API, AI metadata extraction, or UI automation is used. The
+attachment title and filename are the original server filename.
 
-1. Create the child attachment item with `linkMode=imported_file`.
+For a stored-file attachment:
+
+1. Create the standalone attachment item with `linkMode=imported_file`.
 2. POST MD5, filename, byte size, and millisecond mtime to the attachment file
    endpoint with `If-None-Match: *`.
 3. POST exact PDF bytes to the returned local upload URL.
 4. Register the returned upload key at the file endpoint.
-5. GET the attachment and compare MD5 and filename.
+5. GET the attachment and compare MD5. Read its `parentItem` to observe plugin
+   completion separately. Plugins may subsequently rename files; the MCP does not.
 
 Each successful boundary is persisted before proceeding. This is intentionally
 not presented as one atomic transaction.
+
+## Recognition acceptance
+
+The original-filename standalone workflow has been exercised end to end against
+Zotero with Jasminum. After an interactive CNKI verification in the plugin's own
+browser, the existing attachment acquired a bibliographic parent automatically;
+no second import or metadata write was required. This is an observed integration
+path, not a guarantee that every PDF can be recognized.
+
+`zotero_verify_import` reports attachment integrity, original-filename preservation
+and plugin parent creation separately. It includes the observed bibliographic
+fields and `runtime.workflow_revision=original-pdf-jasminum-v1`. The revision
+identifies the workflow contract so callers can detect a legacy running server;
+it is not a source-build fingerprint. Missing optional bibliographic fields must
+be judged against the publication, not filled by the MCP.
+
+CNKI download access and the plugin's CNKI verification session are independent.
+An outstanding plugin CAPTCHA calls for user interaction and read-only polling
+of the same operation, not another download/import or automatic SSO. See the
+companion Skill's `references/pdf-zotero-verification.md` for bounded checks.
 
 ## Deliberate omissions
 

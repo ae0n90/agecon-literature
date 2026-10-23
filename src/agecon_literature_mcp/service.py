@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .cnki import CnkiProvider
 from .config import Settings
 from .exceptions import ConflictDetected, InvalidPlan, SourceUnavailable, ZoteroError
@@ -22,9 +23,9 @@ from .models import (
     RelationCompleteness,
     SearchSpec,
 )
-from .pdf import is_cnki_url, safe_filename, validate_pdf
+from .pdf import is_cnki_url, validate_pdf
 from .storage import Ledger
-from .zotero import ZoteroLocalClient
+from .zotero import ZoteroLocalClient, assess_metadata
 
 
 def public_record(record: LiteratureRecord, *, include_raw: bool = False) -> dict[str, Any]:
@@ -318,13 +319,14 @@ class LiteratureService:
             raise InvalidPlan("record has no CNKI detail URL")
         if not is_cnki_url(detail_url):
             raise InvalidPlan("record detail URL is not an HTTPS cnki.net URL")
-        destination = self.settings.downloads_dir / record.id / safe_filename(record.title)
+        destination = self.settings.downloads_dir / record.id
         payload = {
             "record_id": record.id,
             "record_fingerprint": record.fingerprint,
             "detail_url": detail_url,
             "destination": str(destination),
             "format": "pdf",
+            "filename_policy": "original_server_filename",
         }
         plan_id, token, expires_at = self.ledger.create_plan(
             PlanKind.PDF_DOWNLOAD,
@@ -377,7 +379,11 @@ class LiteratureService:
                 OperationState.COMPLETE,
                 payload_updates={"artifact": artifact.model_dump(mode="json")},
             )
-            return {"operation_id": operation_id, "artifact": result["payload"]["artifact"]}
+            return {
+                "operation_id": operation_id,
+                "artifact": result["payload"]["artifact"],
+                "access": self.cnki.last_download_access,
+            }
         except Exception as exc:
             self.ledger.update_operation(
                 operation_id,
@@ -389,7 +395,12 @@ class LiteratureService:
 
     @staticmethod
     def _exact_matches(matches: list[Any]) -> list[Any]:
-        return [match for match in matches if match.kind != MatchKind.TITLE_CANDIDATE]
+        return [
+            match
+            for match in matches
+            if match.kind
+            in {MatchKind.DOI_EXACT, MatchKind.SOURCE_KEY_EXACT, MatchKind.TITLE_AUTHOR_YEAR_EXACT}
+        ]
 
     @staticmethod
     def _journal_item_type_basis(record: LiteratureRecord) -> tuple[bool, str]:
@@ -410,13 +421,16 @@ class LiteratureService:
         self,
         record_ids: list[str],
         *,
-        mode: str = ImportMode.METADATA_ONLY.value,
+        mode: str = ImportMode.STANDALONE_PDF.value,
         collection_key: str | None = None,
         pdf_paths: dict[str, str] | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Read, validate, and deduplicate a proposed Zotero import without writing."""
         import_mode = ImportMode(mode)
+        # Old callers requesting a new PDF must also use the standalone workflow.
+        if import_mode == ImportMode.METADATA_WITH_PDF:
+            import_mode = ImportMode.STANDALONE_PDF
         if not record_ids:
             raise ValueError("at least one record_id is required")
         if len(record_ids) > self.settings.safety.max_batch_import:
@@ -432,7 +446,11 @@ class LiteratureService:
             journal_supported, item_type_basis = self._journal_item_type_basis(record)
             matches = self.zotero.match(record)
             exact = self._exact_matches(matches)
-            fuzzy = [match for match in matches if match.kind == MatchKind.TITLE_CANDIDATE]
+            fuzzy = [
+                match
+                for match in matches
+                if match.kind in {MatchKind.TITLE_CANDIDATE, MatchKind.TITLE_METADATA_INCOMPLETE}
+            ]
             item: dict[str, Any] = {
                 "record_id": record.id,
                 "record_fingerprint": record.fingerprint,
@@ -445,7 +463,11 @@ class LiteratureService:
                 "item_type_basis": item_type_basis,
                 "matches": [match.model_dump(mode="json") for match in matches],
             }
-            if not journal_supported:
+            if import_mode == ImportMode.STANDALONE_PDF:
+                item["zotero_item_type"] = "attachment"
+                item["item_type_basis"] = "validated PDF; parent metadata belongs to Jasminum"
+                item["tags"] = []
+            if not journal_supported and import_mode != ImportMode.STANDALONE_PDF:
                 conflicts.append(
                     {
                         "record_id": record.id,
@@ -480,7 +502,7 @@ class LiteratureService:
                 item["action"] = "skip_existing" if exact else "create_metadata"
                 if exact:
                     item["existing_item_key"] = exact[0].item_key
-            elif import_mode == ImportMode.METADATA_WITH_PDF:
+            elif import_mode == ImportMode.STANDALONE_PDF:
                 if exact:
                     conflicts.append(
                         {
@@ -493,7 +515,8 @@ class LiteratureService:
                         }
                     )
                     continue
-                item["action"] = "create_metadata_with_pdf"
+                item["action"] = "create_standalone_pdf"
+                item["metadata_owner"] = "Jasminum"
             else:
                 if len(exact) != 1:
                     conflicts.append(
@@ -587,17 +610,20 @@ class LiteratureService:
             return self.ledger.update_operation(operation_id, OperationState.COMPLETE)
 
         parent_key = payload.get("zotero_parent_key") or payload.get("existing_item_key")
-        if action.startswith("create_") and not parent_key:
+        standalone = action == "create_standalone_pdf"
+        if action.startswith("create_") and not standalone and not parent_key:
             marker_items = self.zotero.find_by_operation_marker(operation_id)
+            if len(marker_items) > 1:
+                raise ConflictDetected("multiple items share this operation marker")
             if len(marker_items) == 1:
                 parent_key = marker_items[0].get("key") or marker_items[0].get("data", {}).get(
                     "key"
                 )
             else:
-                current_matches = self._exact_matches(self.zotero.match(record))
+                current_matches = self.zotero.match(record)
                 if current_matches:
                     raise ConflictDetected(
-                        "an exact Zotero item appeared after planning; "
+                        "a Zotero candidate appeared after planning; "
                         "no automatic merge was attempted"
                     )
                 item_payload = self.zotero.item_payload(
@@ -620,9 +646,10 @@ class LiteratureService:
             )
             last_state = OperationState.METADATA_CREATED
 
-        if not parent_key:
+        if not parent_key and not standalone:
             raise InvalidPlan("operation has no verified Zotero parent item")
-        self._verify_parent(str(parent_key), record)
+        if not standalone:
+            self._verify_parent(str(parent_key), record)
         if action == "create_metadata":
             self.ledger.update_operation(
                 operation_id,
@@ -644,20 +671,33 @@ class LiteratureService:
         attachment_key = payload.get("zotero_attachment_key")
         if not attachment_key:
             marked_children = []
-            for child in self.zotero.child_items(str(parent_key)):
+            candidates = (
+                self.zotero.find_by_operation_marker(operation_id)
+                if standalone
+                else self.zotero.child_items(str(parent_key))
+            )
+            for child in candidates:
                 data = child.get("data", child)
                 if isinstance(data, dict) and operation_id in str(data.get("note") or ""):
                     marked_children.append(child)
+            if len(marked_children) > 1:
+                raise ConflictDetected("multiple attachments share this operation marker")
             if len(marked_children) == 1:
                 child = marked_children[0]
                 attachment_key = child.get("key") or child.get("data", {}).get("key")
             else:
+                if standalone and self.zotero.match(record):
+                    raise ConflictDetected("a Zotero match appeared after planning")
                 attachment_payload = self.zotero.attachment_payload(
-                    parent_key=str(parent_key),
+                    parent_key=None if standalone else str(parent_key),
                     artifact=artifact,
-                    title=f"{record.title} (PDF)",
+                    title=artifact.path.name,
                 )
                 attachment_payload["note"] = f"AgEcon-Operation: {operation_id}"
+                if standalone:
+                    attachment_payload["collections"] = (
+                        [payload["collection_key"]] if payload.get("collection_key") else []
+                    )
                 attachment_key = self.zotero.create_item(
                     attachment_payload,
                     expected_server_id=server_id,
@@ -811,10 +851,87 @@ class LiteratureService:
 
     def zotero_verify_import(self, operation_id: str) -> dict[str, Any]:
         """Perform read-only verification of the persisted Zotero result."""
+        runtime = {
+            "package_version": __version__,
+            "workflow_revision": "original-pdf-jasminum-v1",
+            "verification_revision": "identity-fields-v1",
+        }
         operation = self.ledger.get_operation(operation_id)
         payload = operation["payload"]
         parent_key = payload.get("zotero_parent_key") or payload.get("existing_item_key")
         checks: dict[str, Any] = {"parent_exists": False, "attachment_verified": None}
+        if payload.get("action") == "create_standalone_pdf":
+            key = payload.get("zotero_attachment_key")
+            attachment = self.zotero.get_item(key) if key else {}
+            data = attachment.get("data", attachment)
+            original_filename = Path(payload["artifact"]["path"]).name
+            checks["original_filename_preserved"] = data.get("filename") == original_filename
+            checks["attachment_verified"] = bool(key) and self.zotero.verify_attachment(
+                str(key), self._artifact_from_payload(payload)
+            )
+            plugin_parent = data.get("parentItem")
+            metadata: dict[str, Any] = {}
+            if plugin_parent:
+                parent = self.zotero.get_item(plugin_parent)
+                metadata = parent.get("data", parent)
+            checks["parent_exists"] = bool(metadata)
+            checks["pdf_attachment_count"] = None
+            checks["single_expected_pdf"] = None
+            if metadata:
+                children = self.zotero.child_items(plugin_parent)
+                pdfs = [
+                    child
+                    for child in children
+                    if child.get("data", child).get("contentType") == "application/pdf"
+                ]
+                checks["pdf_attachment_count"] = len(pdfs)
+                checks["single_expected_pdf"] = (
+                    len(pdfs) == 1
+                    and (pdfs[0].get("key") or pdfs[0].get("data", {}).get("key")) == key
+                )
+            return {
+                "runtime": runtime,
+                "operation_id": operation_id,
+                "ledger_state": operation["state"],
+                "checks": checks,
+                "verified": checks["attachment_verified"],
+                "metadata_assessment": assess_metadata(
+                    self.ledger.get_record(operation["record_id"]), metadata
+                )
+                if metadata
+                else None,
+                "metadata_owner": "Jasminum",
+                "metadata_status": "parent_created" if metadata else "pending_plugin",
+                "parent_key": plugin_parent,
+                "attachment_key": key,
+                "original_filename": original_filename,
+                "stored_filename": data.get("filename"),
+                "metadata": {
+                    k: metadata.get(k)
+                    for k in (
+                        "itemType",
+                        "title",
+                        "creators",
+                        "date",
+                        "publicationTitle",
+                        "volume",
+                        "issue",
+                        "pages",
+                        "DOI",
+                        "abstractNote",
+                        "university",
+                        "thesisType",
+                    )
+                }
+                if metadata
+                else {},
+                "instruction": (
+                    "Plugin owns recognition; do not synthesize or overwrite metadata. "
+                    "verified reports attachment bytes only, not metadata completeness. "
+                    "If pending, allow a bounded wait and inspect Jasminum for an interactive "
+                    "CNKI verification prompt; do not reimport the attachment."
+                ),
+            }
         if parent_key:
             record = self.ledger.get_record(operation["record_id"])
             try:
@@ -828,6 +945,7 @@ class LiteratureService:
                 str(payload["zotero_attachment_key"]), artifact
             )
         return {
+            "runtime": runtime,
             "operation_id": operation_id,
             "ledger_state": operation["state"],
             "checks": checks,

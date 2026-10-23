@@ -153,6 +153,7 @@ class SearchSpec(BaseModel):
 class ImportMode(StrEnum):
     """Supported, intentionally narrow Zotero import modes."""
 
+    STANDALONE_PDF = "standalone_pdf"
     METADATA_ONLY = "metadata_only"
     METADATA_WITH_PDF = "metadata_with_pdf"
     ATTACH_PDF_TO_EXISTING = "attach_pdf_to_existing"
@@ -208,6 +209,7 @@ class MatchKind(StrEnum):
     DOI_EXACT = "doi_exact"
     SOURCE_KEY_EXACT = "source_key_exact"
     TITLE_AUTHOR_YEAR_EXACT = "title_author_year_exact"
+    TITLE_METADATA_INCOMPLETE = "title_metadata_incomplete"
     TITLE_CANDIDATE = "title_candidate"
 
 

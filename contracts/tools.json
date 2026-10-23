@@ -55,14 +55,14 @@
       "category": "local_write",
       "read_only_external": false,
       "destructive": false,
-      "description": "Consume a confirmed plan, download, and verify one PDF."
+      "description": "Check download access; preserve and verify the original PDF."
     },
     {
       "name": "zotero_plan_import",
       "category": "local_plan",
       "read_only_external": true,
       "destructive": false,
-      "description": "Deduplicate and create a short-lived Zotero import plan."
+      "description": "Plan original-name standalone PDF import; Jasminum owns parent metadata."
     },
     {
       "name": "zotero_commit_import",

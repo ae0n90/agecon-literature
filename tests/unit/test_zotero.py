@@ -225,3 +225,71 @@ def test_doi_and_source_id_matching_use_everything_mode() -> None:
     )
     assert matches[0].kind.value == "doi_exact"
     assert observed_modes == ["everything", "everything", "titleCreatorYear"]
+
+
+def test_recovery_search_includes_plugin_reparented_attachments() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/users/0/items"
+        assert "itemType" not in request.url.params
+        return httpx.Response(
+            200, json=[{"key": "ATCH2345", "data": {"parentItem": "PLUGIN23", "note": "op-test"}}]
+        )
+
+    client = ZoteroLocalClient(
+        ZoteroSettings(),
+        key_store=MemoryKeyStore(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert client.find_by_operation_marker("op-test")[0]["key"] == "ATCH2345"
+
+
+def test_metadata_assessment_separates_identity_and_completeness():
+    from agecon_literature_mcp.zotero import assess_metadata
+
+    record = LiteratureRecord(id="test", title="合作社", authors=["张三"], year=2024)
+    data = {
+        "itemType": "thesis",
+        "title": "合作社",
+        "date": "2024",
+        "creators": [
+            {"creatorType": "contributor", "name": "导师"},
+            {"creatorType": "author", "name": "张三"},
+        ],
+    }
+    assert assess_metadata(record, data)["identity_status"] == "matched"
+    assert assess_metadata(record, data)["missing_fields"] == ["university"]
+    data["date"] = "2023"
+    assert assess_metadata(record, data)["identity_conflicts"] == ["year"]
+    del data["date"]
+    assert assess_metadata(record, data)["identity_status"] == "incomplete"
+
+
+def test_incomplete_title_matches_are_not_exact():
+    from agecon_literature_mcp.models import MatchKind
+    from agecon_literature_mcp.service import LiteratureService
+
+    record = LiteratureRecord(id="test", title="合作社", authors=["张三"], year=2024)
+    data = {"title": "合作社", "creators": [{"name": "张三"}]}
+
+    def handler(request):
+        assert request.method == "GET"
+        return httpx.Response(200, json=[{"key": "ITEM2345", "data": data}])
+
+    client = ZoteroLocalClient(
+        ZoteroSettings(),
+        key_store=MemoryKeyStore(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    matches = client.match(record)
+    assert matches[0].kind == MatchKind.TITLE_METADATA_INCOMPLETE
+    assert LiteratureService._exact_matches(matches) == []
+    data["date"] = "2024"
+    assert client.match(record)[0].kind == MatchKind.TITLE_AUTHOR_YEAR_EXACT
+    data["creators"] = [{"creatorType": "contributor", "name": "张三"}]
+    assert client.match(record)[0].kind == MatchKind.TITLE_METADATA_INCOMPLETE
+
+    data["creators"] = [{"name": "张三"}]
+    record.authors = []
+    assert client.match(record)[0].kind == MatchKind.TITLE_METADATA_INCOMPLETE
+    record.authors = ["李四"]
+    assert client.match(record)[0].kind == MatchKind.TITLE_CANDIDATE

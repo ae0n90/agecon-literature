@@ -57,27 +57,47 @@ item as `[待核验：知网未检得]` with the attempts made.
 5. **Expand** with `lit_expand_relations` at depth 1 only. Relation results are
    candidates with a completeness flag, not verified or exhaustive citation
    edges; otherwise snowball through new title, author or journal searches.
-6. **Full text** only when the abstract cannot settle identification, data,
-   measurement, main results, mechanism evidence, a relevant contradiction or
-   reference tracing. Call `pdf_plan`, present title, reason and destination,
-   wait for approval, then `pdf_download`. A validation failure is a failure;
-   never accept HTML, CAJ or a renamed file as a PDF.
-7. **Import.** Choose `metadata_only`, `metadata_with_pdf` (new parent plus PDF)
-   or `attach_pdf_to_existing` (one exact existing parent; metadata untouched).
-   Import into the collection the MCP config allowlists; the recommended setup
-   is a single Inbox collection the user files from by hand, so do not pick
-   topic collections for the user. Call `zotero_plan_import`, show each
-   create/attach/skip/conflict action, the target and `item_type_basis`, and
-   note that Zotero may sync. Theses, conference papers and newspapers are
-   unsupported-type conflicts in v0.1; do not force them into
-   `journalArticle`. After approval, `zotero_commit_import`, then
-   `zotero_verify_import`. For `recoverable_failed`, use `zotero_plan_resume`,
-   show the continuation, and resume only after approval.
-8. **After import,** do not edit Zotero metadata. List missing or doubtful
-   fields (volume, issue, pages, DOI, session-only CNKI URL) for the user's own
-   metadata tool, such as the Jasminum plugin. Keep provenance (record ID,
-   evidence level, PDF hash) in the report and MCP ledger, not in Zotero fields
-   that plugins may rewrite.
+6. **PDF download.** Only when the user requests PDF download, run the
+   download workflow. Do not check IP entitlement or initiate login for searches,
+   abstracts, or literature maps. `pdf_download` checks CNKI's current network
+   recognition and tries direct campus-IP access first. Off campus, use the user's
+   institutional/organization SSO login when direct access requires authentication;
+   do not send an on-campus user through SSO by default. An unknown network signal
+   or timeout is not proof that SSO is required. See `references/cnki-access.md`.
+   Present `pdf_plan`, then consume its approved token. Preserve the server's
+   original PDF filename exactly. Never derive a filename from the title, add a
+   year/author prefix, or convert CAJ/HTML into a `.pdf` by renaming it. If the
+   original name is missing or unsafe, report failure rather than inventing one.
+7. **PDF import.** Use `zotero_plan_import(mode="standalone_pdf")` with the
+   verified original-name PDF. The MCP creates only an independent stored PDF
+   attachment in the allowlisted collection; it does not create a bibliographic
+   parent or fill title/author/year/journal fields. Jasminum automatically detects
+   the standalone Chinese PDF and creates its parent metadata in Zotero. Do not
+   implement metadata recognition in the Skill, invoke AI extraction, detach and
+   reattach files, merge parents, or drive plugin menus to imitate this process.
+   Present the concrete plan and execute it once approved. Existing matching
+   parents are conflicts, not permission to create duplicates or merge them.
+   `metadata_with_pdf` is a compatibility alias for `standalone_pdf` in new plans.
+   Only use `metadata_only` or `attach_pdf_to_existing` when explicitly requested;
+   adding a child PDF does not trigger the standalone recognition workflow.
+8. **Verify, without rewriting.** Call `zotero_verify_import` after commit. A
+   verified attachment means the bytes arrived; `metadata_status=pending_plugin`
+   means Jasminum has not yet created a parent. If the user needs the recognition
+   result, read back after a bounded wait and report the actual status and fields.
+   A created parent is not proof that all bibliographic fields are complete.
+   Never synthesize missing fields or declare recognition successful merely
+   because the upload completed. If the plugin is disabled, awaiting a candidate
+   selection, or failed, report that state and leave recognition to Jasminum.
+   Resume failed uploads using a fresh reviewed resume plan, without creating
+   another attachment. Keep provenance in the MCP ledger. For the tested
+   recognition sequence, CNKI verification prompts, duplicate checks and stale
+   MCP detection, follow `references/pdf-zotero-verification.md`.
+
+   When full-text reading is requested, reuse the local page cache and record
+   actual reading coverage in existing notes, following
+   `references/full-text-reading.md`. Extraction alone does not justify a `[全文]`
+   claim. This adds no approval step.
+
 9. **Map** (only when a field map or synthesis is requested). Use
    `lit_find_authors` and `lit_session_summary` as descriptive inputs and cover
    what is relevant: search coverage, themes, important authors (separating

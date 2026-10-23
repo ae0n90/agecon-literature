@@ -46,8 +46,8 @@ class FakeZotero:
     def find_by_operation_marker(self, operation_id: str) -> list[dict[str, Any]]:
         return [
             {"key": key, "data": value}
-            for key, value in self.parents.items()
-            if operation_id in value.get("extra", "")
+            for key, value in (self.parents | self.attachments).items()
+            if operation_id in value.get("extra", "") or operation_id in value.get("note", "")
         ]
 
     item_payload = staticmethod(ZoteroLocalClient.item_payload)
@@ -102,9 +102,7 @@ class FakeZotero:
         self.current_artifact = artifact
         attachment = self.attachments[attachment_key]
         # A successful fake registration on resume sets md5 just before verification.
-        if self.register_attempts and not (
-            self.fail_register_once and self.register_attempts == 1
-        ):
+        if self.register_attempts and not (self.fail_register_once and self.register_attempts == 1):
             attachment["md5"] = artifact.md5
         return bool(attachment.get("md5") == artifact.md5)
 
@@ -144,9 +142,7 @@ def test_metadata_only_plan_and_commit_complete(tmp_path: Path) -> None:
     service = _service(tmp_path, FakeZotero())
     plan = service.zotero_plan_import(["cnki-1"], mode="metadata_only")
     assert plan["items"][0]["action"] == "create_metadata"
-    committed = service.zotero_commit_import(
-        plan["plan_id"], plan["confirmation_token"]
-    )
+    committed = service.zotero_commit_import(plan["plan_id"], plan["confirmation_token"])
     assert committed["complete"] is True
     assert committed["operations"][0]["state"] == OperationState.COMPLETE.value
 
@@ -192,3 +188,140 @@ def test_known_thesis_is_not_forced_into_journal_article(tmp_path: Path) -> None
     plan = service.zotero_plan_import(["cnki-thesis"], mode="metadata_only")
     assert plan["status"] == "conflict"
     assert "thesis" in plan["conflicts"][0]["reason"]
+
+
+def test_default_pdf_import_does_not_create_bibliographic_parent(
+    tmp_path: Path,
+    sample_pdf: Path,
+) -> None:
+    original = tmp_path / "合作社组织研究_张三.PDF"
+    original.write_bytes(sample_pdf.read_bytes())
+    fake = FakeZotero()
+    fake.current_artifact = validate_pdf(original, max_bytes=1_000_000)
+    service = _service(tmp_path, fake)
+    plan = service.zotero_plan_import(["cnki-1"], pdf_paths={"cnki-1": str(original)})
+    assert plan["items"][0]["action"] == "create_standalone_pdf"
+    result = service.zotero_commit_import(plan["plan_id"], plan["confirmation_token"])
+    assert result["complete"]
+    assert fake.parents == {}
+    attachment = fake.attachments["ATCH2345"]
+    assert "parentItem" not in attachment
+    assert attachment["title"] == attachment["filename"] == original.name
+    assert not any(k in attachment for k in ("creators", "date", "publicationTitle"))
+    operation = result["operations"][0]["id"]
+    verification = service.zotero_verify_import(operation)
+    assert verification["verified"]
+    assert verification["metadata_status"] == "pending_plugin"
+    assert verification["checks"]["original_filename_preserved"]
+    assert verification["attachment_key"] == "ATCH2345"
+    assert verification["stored_filename"] == original.name
+    # Observe and assess plugin metadata without rewriting it.
+    fake.parents["PLUGIN23"] = {"title": "合作社组织研究", "issue": "10", "pages": "79-88"}
+    attachment["parentItem"] = "PLUGIN23"
+    verification = service.zotero_verify_import(operation)
+    assert verification["metadata_status"] == "parent_created"
+    assert verification["metadata"]["pages"] == "79-88"
+    assert verification["metadata_assessment"]["identity_status"] == "conflict"
+    assert "date" in verification["metadata_assessment"]["missing_fields"]
+    assert verification["checks"]["single_expected_pdf"]
+    fake.attachments["EXTRA234"] = dict(attachment)
+    duplicate_check = service.zotero_verify_import(operation)
+    assert duplicate_check["checks"]["pdf_attachment_count"] == 2
+    assert not duplicate_check["checks"]["single_expected_pdf"]
+    del fake.attachments["EXTRA234"]
+    assert "date" not in fake.parents["PLUGIN23"]  # Never fill missing plugin fields.
+    # A subsequent plugin rename must be reported without rewriting the item or
+    # confusing a filename change with damaged bytes.
+    attachment["filename"] = "插件重命名.pdf"
+    verification = service.zotero_verify_import(operation)
+    assert verification["verified"]
+    assert not verification["checks"]["original_filename_preserved"]
+    assert verification["original_filename"] == original.name
+    assert verification["stored_filename"] == "插件重命名.pdf"
+    assert len(fake.attachments) == len(fake.parents) == 1
+
+
+def test_legacy_new_pdf_request_uses_standalone_mode(tmp_path: Path, sample_pdf: Path) -> None:
+    service = _service(tmp_path, FakeZotero())
+    plan = service.zotero_plan_import(
+        ["cnki-1"], mode="metadata_with_pdf", pdf_paths={"cnki-1": str(sample_pdf)}
+    )
+    assert plan["items"][0]["action"] == "create_standalone_pdf"
+    assert plan["items"][0]["mode"] == "standalone_pdf"
+
+
+def test_standalone_resume_after_plugin_reparenting(tmp_path: Path, sample_pdf: Path) -> None:
+    fake = FakeZotero(fail_register_once=True)
+    fake.current_artifact = validate_pdf(sample_pdf, max_bytes=1_000_000)
+    service = _service(tmp_path, fake)
+    plan = service.zotero_plan_import(["cnki-1"], pdf_paths={"cnki-1": str(sample_pdf)})
+    first = service.zotero_commit_import(plan["plan_id"], plan["confirmation_token"])
+    operation = first["operations"][0]
+    assert operation["state"] == "recoverable_failed"
+    fake.parents["PLUGIN23"] = {"title": "插件规范化后的标题"}
+    fake.attachments["ATCH2345"]["parentItem"] = "PLUGIN23"
+    resume = service.zotero_plan_resume(operation["id"])
+    result = service.zotero_resume_import(resume["plan_id"], resume["confirmation_token"])
+    assert result["state"] == "complete"
+    assert len(fake.attachments) == len(fake.parents) == 1
+    assert fake.attachments["ATCH2345"]["parentItem"] == "PLUGIN23"
+
+
+def test_incomplete_match_uses_existing_conflict_path(tmp_path: Path, sample_pdf: Path):
+    from agecon_literature_mcp.models import MatchKind, ZoteroMatch
+
+    class IncompleteMatchZotero(FakeZotero):
+        def match(self, record):
+            return [
+                ZoteroMatch(
+                    item_key="ITEM2345",
+                    title=record.title,
+                    kind=MatchKind.TITLE_METADATA_INCOMPLETE,
+                    score=0.9,
+                )
+            ]
+
+    fake = IncompleteMatchZotero()
+    service = _service(tmp_path, fake)
+    plan = service.zotero_plan_import(["cnki-1"], pdf_paths={"cnki-1": str(sample_pdf)})
+    assert plan["conflicts"]
+    assert not plan["safe_items"]
+    assert not plan["committable"]
+    assert not fake.parents and not fake.attachments
+
+
+def test_metadata_commit_stops_on_new_incomplete_candidate(tmp_path: Path, monkeypatch):
+    from agecon_literature_mcp.models import MatchKind, ZoteroMatch
+
+    fake = FakeZotero()
+    service = _service(tmp_path, fake)
+    plan = service.zotero_plan_import(["cnki-1"], mode="metadata_only")
+    monkeypatch.setattr(
+        fake,
+        "match",
+        lambda record: [
+            ZoteroMatch(
+                item_key="ITEM2345",
+                title=record.title,
+                kind=MatchKind.TITLE_METADATA_INCOMPLETE,
+                score=0.9,
+            )
+        ],
+    )
+    result = service.zotero_commit_import(plan["plan_id"], plan["confirmation_token"])
+    assert not result["complete"]
+    assert not fake.parents and not fake.attachments
+
+
+def test_metadata_recovery_rejects_ambiguous_markers(tmp_path: Path, monkeypatch):
+    fake = FakeZotero()
+    service = _service(tmp_path, fake)
+    plan = service.zotero_plan_import(["cnki-1"], mode="metadata_only")
+    monkeypatch.setattr(
+        fake,
+        "find_by_operation_marker",
+        lambda operation_id: [{"key": "FIRST234"}, {"key": "SECOND23"}],
+    )
+    result = service.zotero_commit_import(plan["plan_id"], plan["confirmation_token"])
+    assert not result["complete"]
+    assert not fake.parents and not fake.attachments
